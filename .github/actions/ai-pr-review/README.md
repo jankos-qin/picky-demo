@@ -52,7 +52,7 @@ jobs:
           DEEPSEEK_CODER_MODEL: ${{ vars.DEEPSEEK_CODER_MODEL }}
 ```
 
-When another repository calls the reusable workflow, the workflow dynamically resolves its own source repository using `github.workflow_ref`, so forks work automatically without any manual edits.
+When another repository calls the reusable workflow, the workflow parses the caller's workflow file to resolve the picky source repository at runtime, so forks work automatically without any manual edits.
 
 ## Repository policy file
 

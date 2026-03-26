@@ -1,6 +1,6 @@
 # Picky
 
-Reusable GitHub Action and workflow templates for Picky pull request review.
+AI code reviewer that catches bugs, security holes, and regressions in your pull requests — not style nits.
 
 The review action now auto-detects changed-file languages, expands scoped codebase context, and supports built-in OpenAI-compatible providers with `deepseek` as the default.
 
@@ -32,7 +32,7 @@ The easiest way for another repository to adopt Picky is to call the reusable wo
 2. If `picky` is private, allow reusable workflow access from the consuming repository.
    In the `picky` repo, go to `Settings` -> `Actions` -> `General` and allow other repositories in the organization to use its reusable workflows.
 
-3. Copy [.ai-code-review.yml](/Users/kainan/projects/picky/.ai-code-review.yml) into the consuming repository root.
+3. Copy [`.ai-code-review.yml`](.ai-code-review.yml) into the consuming repository root.
    Adjust exclude rules or prompt guidance only if the defaults do not fit your repo.
    To publish review text in Chinese, set:
    `review.output.language: zh-CN`
@@ -52,7 +52,7 @@ permissions:
 
 jobs:
   review:
-    uses: layerone-labs/picky/.github/workflows/ai-pr-review-reusable.yml@main
+    uses: <your-org>/picky/.github/workflows/ai-pr-review-reusable.yml@main
     with:
       provider: deepseek
       config_path: .ai-code-review.yml
@@ -67,7 +67,7 @@ jobs:
 5. Open or update a pull request in the consuming repository.
    Picky will detect changed-file languages automatically, gather scoped repo context, and post one batched review with inline comments when it finds issues.
 
-Forks work automatically — the reusable workflow dynamically resolves its own source repository at runtime, so no manual edits are needed after forking.
+Forks work automatically — the reusable workflow parses the caller's workflow file to resolve its own source repository at runtime, so no manual edits are needed after forking.
 
 ## Local validation
 
