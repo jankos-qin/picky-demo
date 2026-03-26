@@ -155,6 +155,26 @@ class GitHubClient:
             },
         )
 
+    def create_pull_review(
+        self,
+        number: int,
+        commit_id: str,
+        body: str,
+        comments: list[dict[str, Any]],
+    ) -> None:
+        payload: dict[str, Any] = {
+            "commit_id": commit_id,
+            "event": "COMMENT",
+            "comments": comments,
+        }
+        if body.strip():
+            payload["body"] = body
+        self._request(
+            "POST",
+            f"/repos/{self._repository}/pulls/{number}/reviews",
+            payload,
+        )
+
     def create_issue_comment(self, number: int, body: str) -> None:
         self._request(
             "POST",

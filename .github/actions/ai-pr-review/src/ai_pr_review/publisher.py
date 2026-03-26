@@ -90,6 +90,15 @@ def build_summary_comment(findings: list[Finding], pr_title: str) -> str:
     return "\n".join(header).strip()
 
 
+def build_review_payload_comment(finding: Finding) -> dict[str, str | int]:
+    return {
+        "path": finding.path,
+        "line": int(finding.line or 0),
+        "side": "RIGHT",
+        "body": build_inline_comment(finding),
+    }
+
+
 def extract_fingerprint(body: str) -> str | None:
     if FINGERPRINT_PREFIX not in body:
         return None
@@ -127,28 +136,33 @@ def publish(
     existing_comments = [*existing_review_comments, *existing_issue_comments]
     publishable = dedupe_against_existing(publishable, existing_comments)
 
-    inline_count = 0
-    fallback_findings: list[Finding] = []
-    for finding in publishable:
-        if finding.line is not None and finding.path and commit_id:
-            client.create_review_comment(
-                pr_number,
-                build_inline_comment(finding),
-                finding.path,
-                finding.line,
-                commit_id,
-            )
-            inline_count += 1
-        else:
-            fallback_findings.append(finding)
+    inline_findings = [
+        finding for finding in publishable if finding.line is not None and finding.path and commit_id
+    ]
+    summary_findings = [finding for finding in publishable if finding not in inline_findings]
+    inline_count = len(inline_findings)
 
-    if fallback_findings and post_summary:
-        client.create_issue_comment(pr_number, build_summary_comment(fallback_findings, pr_title))
-        result.posted_summary = True
-    elif post_summary and publishable and inline_count:
+    if inline_findings and commit_id:
+        review_body = build_summary_comment(publishable, pr_title) if post_summary else "## AI PR Review"
+        try:
+            client.create_pull_review(
+                pr_number,
+                commit_id,
+                review_body,
+                [build_review_payload_comment(finding) for finding in inline_findings],
+            )
+            result.posted_inline = inline_count
+            result.posted_summary = post_summary
+        except Exception:
+            client.create_issue_comment(pr_number, build_summary_comment(publishable, pr_title))
+            result.posted_summary = True
+            result.posted_inline = 0
+    elif publishable and post_summary:
         client.create_issue_comment(pr_number, build_summary_comment(publishable, pr_title))
         result.posted_summary = True
+        result.posted_inline = 0
+    elif summary_findings and not post_summary:
+        result.posted_inline = 0
 
-    result.posted_inline = inline_count
     result.skipped_duplicate = len(findings) - len(publishable)
     return result
