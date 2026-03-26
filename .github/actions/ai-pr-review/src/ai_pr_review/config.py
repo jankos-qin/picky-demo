@@ -42,6 +42,42 @@ DEFAULT_CONTEXT_FILES: list[str] = [
     ".eslintrc",
     ".github/copilot-instructions.md",
 ]
+DEFAULT_LANGUAGE_EXTENSIONS: dict[str, str] = {
+    ".py": "python",
+    ".js": "javascript",
+    ".jsx": "jsx",
+    ".mjs": "javascript",
+    ".cjs": "javascript",
+    ".ts": "typescript",
+    ".tsx": "tsx",
+    ".md": "markdown",
+    ".markdown": "markdown",
+    ".yml": "yaml",
+    ".yaml": "yaml",
+    ".json": "json",
+    ".sh": "shell",
+    ".bash": "shell",
+    ".zsh": "shell",
+    ".toml": "toml",
+    ".html": "html",
+    ".htm": "html",
+    ".css": "css",
+    ".go": "go",
+    ".rs": "rust",
+    ".java": "java",
+    ".rb": "ruby",
+    ".php": "php",
+    ".c": "c",
+    ".h": "c",
+    ".cc": "cpp",
+    ".cpp": "cpp",
+    ".cxx": "cpp",
+    ".hpp": "cpp",
+    ".cs": "csharp",
+    ".kt": "kotlin",
+    ".swift": "swift",
+    ".scala": "scala",
+}
 
 
 @dataclass(slots=True)
@@ -50,6 +86,17 @@ class ReviewConfig:
     exclude_paths: list[str] = field(default_factory=list)
     generated_paths: list[str] = field(default_factory=list)
     context_files: list[str] = field(default_factory=lambda: list(DEFAULT_CONTEXT_FILES))
+    language_mode: str = "auto"
+    include_languages: list[str] = field(default_factory=list)
+    exclude_languages: list[str] = field(default_factory=list)
+    extension_overrides: dict[str, str] = field(default_factory=dict)
+    review_unknown_text: bool = False
+    context_mode: str = "scoped"
+    context_max_files: int = 8
+    context_max_bytes: int = 32000
+    context_include_tests: bool = True
+    context_include_imports: bool = True
+    context_include_repo_files: bool = True
     prompt_extensions: str = ""
     max_files: int = 20
     max_patch_chars: int = 24000
@@ -89,6 +136,18 @@ def _split_list(value: Any) -> list[str]:
     if isinstance(value, str):
         return [line.strip() for line in value.splitlines() if line.strip()]
     return [str(value).strip()]
+
+
+def _split_map(value: Any) -> dict[str, str]:
+    if not isinstance(value, dict):
+        return {}
+    result: dict[str, str] = {}
+    for key, item in value.items():
+        normalized_key = str(key).strip()
+        normalized_value = str(item).strip().lower()
+        if normalized_key and normalized_value:
+            result[normalized_key] = normalized_value
+    return result
 
 
 def _coerce_scalar(value: str) -> Any:
@@ -254,6 +313,8 @@ def load_review_config(
                 limits = review.get("limits") if isinstance(review.get("limits"), dict) else {}
                 reporting = review.get("reporting") if isinstance(review.get("reporting"), dict) else {}
                 prompt = review.get("prompt") if isinstance(review.get("prompt"), dict) else {}
+                languages = review.get("languages") if isinstance(review.get("languages"), dict) else {}
+                context = review.get("context") if isinstance(review.get("context"), dict) else {}
 
                 config.include_paths = _split_list(
                     paths.get("include")
@@ -275,6 +336,35 @@ def load_review_config(
                     or review.get("skip_paths")
                 )
                 config.context_files = _split_list(review.get("context_files")) or config.context_files
+                config.language_mode = str(languages.get("mode") or config.language_mode).strip().lower() or "auto"
+                config.include_languages = [
+                    item.lower() for item in _split_list(languages.get("include") or languages.get("allow"))
+                ]
+                config.exclude_languages = [
+                    item.lower() for item in _split_list(languages.get("exclude") or languages.get("deny"))
+                ]
+                config.extension_overrides = _split_map(
+                    languages.get("extension_overrides") or languages.get("overrides")
+                )
+                config.review_unknown_text = _as_bool(
+                    languages.get("review_unknown_text"),
+                    config.review_unknown_text,
+                )
+                config.context_mode = str(context.get("mode") or config.context_mode).strip().lower() or "scoped"
+                config.context_max_files = _as_int(context.get("max_files"), config.context_max_files)
+                config.context_max_bytes = _as_int(context.get("max_bytes"), config.context_max_bytes)
+                config.context_include_tests = _as_bool(
+                    context.get("include_tests"),
+                    config.context_include_tests,
+                )
+                config.context_include_imports = _as_bool(
+                    context.get("include_imports"),
+                    config.context_include_imports,
+                )
+                config.context_include_repo_files = _as_bool(
+                    context.get("include_repo_files"),
+                    config.context_include_repo_files,
+                )
                 extensions = prompt.get("extensions") if isinstance(prompt.get("extensions"), list) else prompt.get("extensions")
                 if extensions is None:
                     extensions = review.get("prompt_extensions") or review.get("prompt")
@@ -311,5 +401,9 @@ def load_review_config(
 
     if config.min_severity_to_publish not in SEVERITY_ORDER:
         config.min_severity_to_publish = "low"
+    if config.language_mode not in {"auto"}:
+        config.language_mode = "auto"
+    if config.context_mode not in {"scoped"}:
+        config.context_mode = "scoped"
 
     return config

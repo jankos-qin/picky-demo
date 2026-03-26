@@ -4,16 +4,17 @@
 version: 1
 
 review:
+  languages:
+    mode: auto
+    review_unknown_text: false
+  context:
+    mode: scoped
+    max_files: 8
+    max_bytes: 32000
+    include_tests: true
+    include_imports: true
+    include_repo_files: true
   paths:
-    include:
-      - "**/*.py"
-      - "**/*.js"
-      - "**/*.jsx"
-      - "**/*.ts"
-      - "**/*.tsx"
-      - "**/*.md"
-      - "**/*.yml"
-      - "**/*.yaml"
     exclude:
       - "**/dist/**"
       - "**/build/**"

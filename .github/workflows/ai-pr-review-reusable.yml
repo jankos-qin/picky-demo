@@ -7,12 +7,15 @@ on:
         description: AI provider to use for review generation.
         required: false
         type: string
-        default: openai
+        default: deepseek
       model:
         description: Model name to use for the review.
         required: false
         type: string
-        default: gpt-5.1
+      base_url:
+        description: Optional provider base URL override.
+        required: false
+        type: string
       config_path:
         description: Path to the repo review config.
         required: false
@@ -41,7 +44,16 @@ on:
     secrets:
       api_key:
         description: API key for the selected LLM provider.
-        required: true
+        required: false
+      DEEPSEEK_API_KEY:
+        description: DeepSeek API key.
+        required: false
+      BCP_API_KEY:
+        description: BCP API key.
+        required: false
+      OPENAI_API_KEY:
+        description: OpenAI API key.
+        required: false
 
 permissions:
   contents: read
@@ -64,10 +76,21 @@ jobs:
       - name: Run AI PR review
         uses: OWNER/picky/.github/actions/ai-pr-review@main
         continue-on-error: true
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL }}
+          DEEPSEEK_CODER_MODEL: ${{ vars.DEEPSEEK_CODER_MODEL }}
+          BCP_API_KEY: ${{ secrets.BCP_API_KEY }}
+          BCP_BASE_URL: ${{ vars.BCP_BASE_URL }}
+          BCP_CODER_MODEL: ${{ vars.BCP_CODER_MODEL }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          OPENAI_BASE_URL: ${{ vars.OPENAI_BASE_URL }}
+          OPENAI_CODER_MODEL: ${{ vars.OPENAI_CODER_MODEL }}
         with:
           provider: ${{ inputs.provider }}
           model: ${{ inputs.model }}
           api_key: ${{ secrets.api_key }}
+          base_url: ${{ inputs.base_url }}
           config_path: ${{ inputs.config_path }}
           max_files: ${{ inputs.max_files }}
           max_patch_chars: ${{ inputs.max_patch_chars }}

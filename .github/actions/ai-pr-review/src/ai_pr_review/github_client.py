@@ -26,6 +26,7 @@ class GitHubClient:
         self._token = token
         self._repository = repository
         self._api_base = api_base.rstrip("/")
+        self._file_cache: dict[tuple[str, str], RepoContextFile | None] = {}
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
         data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -90,17 +91,24 @@ class GitHubClient:
         return files
 
     def get_repo_file(self, path: str, ref: str) -> RepoContextFile | None:
+        cache_key = (path, ref)
+        if cache_key in self._file_cache:
+            return self._file_cache[cache_key]
         encoded_path = quote(path, safe="/")
         data = self._request(
             "GET",
             f"/repos/{self._repository}/contents/{encoded_path}?ref={quote(ref, safe='')}",
         )
         if not isinstance(data, dict):
+            self._file_cache[cache_key] = None
             return None
         if data.get("encoding") != "base64" or "content" not in data:
+            self._file_cache[cache_key] = None
             return None
         content = base64.b64decode(data["content"]).decode("utf-8", errors="replace")
-        return RepoContextFile(path=path, content=content)
+        result = RepoContextFile(path=path, content=content)
+        self._file_cache[cache_key] = result
+        return result
 
     def list_review_comments(self, number: int) -> list[GitHubComment]:
         data = self._request("GET", f"/repos/{self._repository}/pulls/{number}/comments?per_page=100")

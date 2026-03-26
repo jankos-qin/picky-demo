@@ -10,6 +10,7 @@ from .config import (
     DEFAULT_GENERATED_PATTERNS,
     ReviewConfig,
 )
+from .detector import detect_language
 from .models import ChangedFile, ReviewChunk
 
 
@@ -83,10 +84,22 @@ def is_generated_path(path: str, config: ReviewConfig) -> bool:
 def should_include_file(file: ChangedFile, config: ReviewConfig) -> bool:
     if is_binary_patch(file) or is_generated_path(file.path, config):
         return False
-    if config.include_paths and not _path_matches(file.path, config.include_paths):
+    detection = detect_language(file.path, (file.patch or "")[:4096], config)
+    file.language = detection.language
+    if not detection.is_text:
+        return False
+    if detection.language is None and not config.review_unknown_text:
+        return False
+    if config.include_languages and (detection.language or "") not in config.include_languages:
+        return False
+    if config.exclude_languages and (detection.language or "") in config.exclude_languages:
         return False
     patterns = [*DEFAULT_EXCLUDE_PATTERNS, *config.exclude_paths]
-    return not _path_matches(file.path, patterns)
+    if _path_matches(file.path, patterns):
+        return False
+    if config.include_paths and not _path_matches(file.path, config.include_paths):
+        return False
+    return True
 
 
 def parse_unified_diff(patch: str) -> list[DiffHunk]:
@@ -158,7 +171,7 @@ def chunk_patch(file: ChangedFile, max_chars: int) -> list[ReviewChunk]:
     if len(patch) <= max_chars:
         if not patch.strip():
             return []
-        return [ReviewChunk(file_path=file.path, patch=patch)]
+        return [ReviewChunk(file_path=file.path, patch=patch, language=file.language)]
 
     chunks: list[ReviewChunk] = []
     hunks = parse_unified_diff(patch)
@@ -174,6 +187,7 @@ def chunk_patch(file: ChangedFile, max_chars: int) -> list[ReviewChunk]:
                     ReviewChunk(
                         file_path=file.path,
                         patch=combined,
+                        language=file.language,
                         start_line=current_hunks[0].start_line,
                         end_line=current_hunks[-1].end_line,
                         original_patch=patch,
@@ -185,6 +199,7 @@ def chunk_patch(file: ChangedFile, max_chars: int) -> list[ReviewChunk]:
                 ReviewChunk(
                     file_path=file.path,
                     patch=rendered,
+                    language=file.language,
                     start_line=hunk.start_line,
                     end_line=hunk.end_line,
                     original_patch=patch,
@@ -197,6 +212,7 @@ def chunk_patch(file: ChangedFile, max_chars: int) -> list[ReviewChunk]:
                 ReviewChunk(
                     file_path=file.path,
                     patch=combined,
+                    language=file.language,
                     start_line=current_hunks[0].start_line,
                     end_line=current_hunks[-1].end_line,
                     original_patch=patch,
@@ -213,6 +229,7 @@ def chunk_patch(file: ChangedFile, max_chars: int) -> list[ReviewChunk]:
             ReviewChunk(
                 file_path=file.path,
                 patch=combined,
+                language=file.language,
                 start_line=current_hunks[0].start_line,
                 end_line=current_hunks[-1].end_line,
                 original_patch=patch,

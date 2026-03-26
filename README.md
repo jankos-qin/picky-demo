@@ -2,6 +2,8 @@
 
 Reusable GitHub Action and workflow templates for AI-assisted pull request review.
 
+The review action now auto-detects changed-file languages, expands scoped codebase context, and supports built-in OpenAI-compatible providers with `deepseek` as the default.
+
 ## What is in this repo
 
 - `.github/actions/ai-pr-review/`: the review action implementation
@@ -12,8 +14,8 @@ Reusable GitHub Action and workflow templates for AI-assisted pull request revie
 
 ## Quick start
 
-1. Add an API key secret named `OPENAI_API_KEY` to a repository.
-2. Copy `.ai-code-review.yml` into that repository and adjust include/exclude rules.
+1. Add provider-native secrets and vars to a repository, such as `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, and `DEEPSEEK_CODER_MODEL`.
+2. Copy `.ai-code-review.yml` into that repository and adjust exclude rules or context settings if needed.
 3. Either:
    - copy the PR workflow pattern from `.github/workflows/ai-pr-review.yml`, or
    - call `.github/workflows/ai-pr-review-reusable.yml` from that repository.

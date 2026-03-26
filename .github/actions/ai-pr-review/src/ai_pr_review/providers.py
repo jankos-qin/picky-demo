@@ -1,9 +1,92 @@
 from __future__ import annotations
 
+import os
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 
 from .models import ReviewPrompt
 from .prompting import SYSTEM_PROMPT, build_prompt
+
+
+@dataclass(slots=True)
+class ProviderSettings:
+    provider: str
+    api_key: str
+    model: str
+    base_url: str | None = None
+
+
+@dataclass(slots=True)
+class ProviderDefinition:
+    provider: str
+    api_key_env: str
+    base_url_env: str | None
+    model_env: str | None
+    default_model: str
+
+
+PROVIDERS: dict[str, ProviderDefinition] = {
+    "deepseek": ProviderDefinition(
+        provider="deepseek",
+        api_key_env="DEEPSEEK_API_KEY",
+        base_url_env="DEEPSEEK_BASE_URL",
+        model_env="DEEPSEEK_CODER_MODEL",
+        default_model="deepseek-coder",
+    ),
+    "bcp": ProviderDefinition(
+        provider="bcp",
+        api_key_env="BCP_API_KEY",
+        base_url_env="BCP_BASE_URL",
+        model_env="BCP_CODER_MODEL",
+        default_model="bcp-coder",
+    ),
+    "openai": ProviderDefinition(
+        provider="openai",
+        api_key_env="OPENAI_API_KEY",
+        base_url_env="OPENAI_BASE_URL",
+        model_env="OPENAI_CODER_MODEL",
+        default_model="gpt-4.1-mini",
+    ),
+}
+
+
+def resolve_provider_settings(
+    provider_name: str,
+    *,
+    api_key: str | None = None,
+    model: str | None = None,
+    base_url: str | None = None,
+) -> ProviderSettings:
+    normalized = (provider_name or "deepseek").strip().lower()
+    definition = PROVIDERS.get(normalized)
+    if definition is None:
+        raise RuntimeError(
+            f"Unsupported provider '{provider_name}'. Supported providers: {', '.join(sorted(PROVIDERS))}."
+        )
+
+    resolved_api_key = (api_key or "").strip() or os.environ.get(definition.api_key_env, "").strip()
+    if not resolved_api_key:
+        raise RuntimeError(
+            f"Missing API key for provider '{normalized}'. Set the action input 'api_key' or env '{definition.api_key_env}'."
+        )
+
+    resolved_model = (model or "").strip()
+    if not resolved_model and definition.model_env:
+        resolved_model = os.environ.get(definition.model_env, "").strip()
+    if not resolved_model:
+        resolved_model = definition.default_model
+
+    resolved_base_url = (base_url or "").strip() or None
+    if resolved_base_url is None and definition.base_url_env:
+        env_base_url = os.environ.get(definition.base_url_env, "").strip()
+        resolved_base_url = env_base_url or None
+
+    return ProviderSettings(
+        provider=normalized,
+        api_key=resolved_api_key,
+        model=resolved_model,
+        base_url=resolved_base_url,
+    )
 
 
 class ProviderAdapter(ABC):
@@ -13,7 +96,7 @@ class ProviderAdapter(ABC):
 
 
 class OpenAIProvider(ProviderAdapter):
-    def __init__(self, api_key: str, model: str) -> None:
+    def __init__(self, api_key: str, model: str, base_url: str | None = None) -> None:
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - environment specific
@@ -21,7 +104,7 @@ class OpenAIProvider(ProviderAdapter):
                 "openai package is not installed. Install requirements.txt from the action directory."
             ) from exc
 
-        self._client = OpenAI(api_key=api_key)
+        self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._model = model
 
     def review(self, prompt: ReviewPrompt) -> str:

@@ -9,6 +9,7 @@ from ._path import ACTION_SRC  # noqa: F401
 from ai_pr_review.config import ReviewConfig
 from ai_pr_review.models import ChangedFile, PullRequestInfo, RepoContextFile
 from ai_pr_review.orchestrator import normalize_findings, run_review
+from ai_pr_review.providers import ProviderSettings
 
 
 class FakeProvider:
@@ -69,7 +70,15 @@ class OrchestratorTests(unittest.TestCase):
 +newer
 """
         files = [ChangedFile(path="src/app.py", status="modified", patch=patch_text)]
-        fake_client = FakeClient(files, context={"README.md": "repo guidance"})
+        fake_client = FakeClient(
+            files,
+            context={
+                "README.md": "repo guidance",
+                "src/app.py": "from .helpers import helper\nhelper()",
+                "src/helpers.py": "def helper():\n    return 1\n",
+                "tests/test_app.py": "def test_helper():\n    assert True\n",
+            },
+        )
         response = json.dumps(
             {
                 "findings": [
@@ -85,7 +94,7 @@ class OrchestratorTests(unittest.TestCase):
                 ]
             }
         )
-        config = ReviewConfig(max_files=5, max_patch_chars=25, context_files=["README.md"])
+        config = ReviewConfig(max_files=5, max_patch_chars=25, context_files=["README.md"], context_max_files=6)
         pr = PullRequestInfo(number=1, title="Update logic", body="body", head_sha="abc123")
 
         fake_provider = FakeProvider(response)
@@ -95,9 +104,11 @@ class OrchestratorTests(unittest.TestCase):
                 pr_number=1,
                 pr=pr,
                 config=config,
-                provider_name="openai",
-                api_key="secret",
-                model="gpt-test",
+                provider_settings=ProviderSettings(
+                    provider="openai",
+                    api_key="secret",
+                    model="gpt-test",
+                ),
             )
 
         self.assertEqual(1, result.files_reviewed)
@@ -105,8 +116,11 @@ class OrchestratorTests(unittest.TestCase):
         self.assertEqual(1, len(result.findings))
         self.assertEqual("src/app.py", result.findings[0].path)
         self.assertEqual(2, len(fake_provider.prompts))
-        self.assertIn("repo guidance", fake_provider.prompts[0].repo_context[0].content)
+        self.assertEqual("python", fake_provider.prompts[0].chunk.language)
+        self.assertTrue(any(item.reason == "Repo manifest" for item in fake_provider.prompts[0].repo_context))
+        self.assertTrue(any(item.reason == "Imported module" for item in fake_provider.prompts[0].repo_context))
         self.assertIn("README.md", fake_client.requested_files)
+        self.assertIn("src/helpers.py", fake_client.requested_files)
 
 
 if __name__ == "__main__":

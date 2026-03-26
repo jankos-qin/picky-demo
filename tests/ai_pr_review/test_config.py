@@ -29,6 +29,18 @@ review:
     exclude:
       - "**/*.generated.*"
       - "**/*.snap"
+  languages:
+    mode: auto
+    include:
+      - python
+      - javascript
+    extension_overrides:
+      .foo: python
+  context:
+    mode: scoped
+    max_files: 5
+    max_bytes: 4096
+    include_tests: false
   limits:
     max_files: 25
     max_patch_chars: 120000
@@ -48,6 +60,11 @@ review:
         self.assertEqual(["**/*.py", "**/*.js"], config.include_paths)
         self.assertEqual(["**/dist/**"], config.exclude_paths)
         self.assertEqual(["**/*.generated.*", "**/*.snap"], config.generated_paths)
+        self.assertEqual(["python", "javascript"], config.include_languages)
+        self.assertEqual("python", config.extension_overrides[".foo"])
+        self.assertEqual(5, config.context_max_files)
+        self.assertEqual(4096, config.context_max_bytes)
+        self.assertFalse(config.context_include_tests)
         self.assertEqual(25, config.max_files)
         self.assertEqual(120000, config.max_patch_chars)
         self.assertEqual("medium", config.min_severity_to_publish)

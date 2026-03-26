@@ -8,6 +8,7 @@ from .config import load_review_config
 from .github_client import GitHubClient
 from .orchestrator import run_review
 from .publisher import publish
+from .providers import resolve_provider_settings
 
 
 def _read_event(path: str) -> dict:
@@ -47,14 +48,18 @@ def main() -> int:
     )
     client = GitHubClient(token=token, repository=repository)
     pr_info = client.get_pull_request(pr_number)
+    provider_settings = resolve_provider_settings(
+        _input("provider", "deepseek") or "deepseek",
+        api_key=_input("api_key"),
+        model=_input("model"),
+        base_url=_input("base_url"),
+    )
     review = run_review(
         client=client,
         pr_number=pr_number,
         pr=pr_info,
         config=config,
-        provider_name=_input("provider", "openai") or "openai",
-        api_key=_input("api_key", "") or "",
-        model=_input("model", "gpt-4.1-mini") or "gpt-4.1-mini",
+        provider_settings=provider_settings,
     )
     publish(
         client=client,

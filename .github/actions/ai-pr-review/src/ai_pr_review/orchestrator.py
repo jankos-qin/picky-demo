@@ -5,11 +5,17 @@ from dataclasses import dataclass
 from typing import Any
 
 from .config import ReviewConfig
+from .context_builder import build_repo_context
 from .diff import build_review_chunks, should_include_file
 from .github_client import GitHubClient
-from .models import Finding, RepoContextFile, ReviewPrompt
+from .models import Finding, ReviewPrompt
 from .prompting import build_policy_summary
-from .providers import OpenAIProvider, ProviderAdapter, UnsupportedProvider
+from .providers import (
+    OpenAIProvider,
+    ProviderAdapter,
+    ProviderSettings,
+    UnsupportedProvider,
+)
 from .publisher import finding_fingerprint
 
 
@@ -21,10 +27,10 @@ class ReviewRunResult:
     files_skipped: int
 
 
-def _provider_for(name: str, api_key: str, model: str) -> ProviderAdapter:
-    if name.lower() == "openai":
-        return OpenAIProvider(api_key=api_key, model=model)
-    return UnsupportedProvider(name)
+def _provider_for(settings: ProviderSettings) -> ProviderAdapter:
+    if settings.provider in {"openai", "deepseek", "bcp"}:
+        return OpenAIProvider(api_key=settings.api_key, model=settings.model, base_url=settings.base_url)
+    return UnsupportedProvider(settings.provider)
 
 
 def _extract_json(text: str) -> Any:
@@ -79,35 +85,24 @@ def normalize_findings(payload: Any, default_path: str) -> list[Finding]:
     return findings
 
 
-def _load_repo_context(client: GitHubClient, config: ReviewConfig, ref: str | None) -> list[RepoContextFile]:
-    context: list[RepoContextFile] = []
-    if not ref:
-        return context
-    for path in config.context_files:
-        try:
-            item = client.get_repo_file(path, ref)
-        except Exception:
-            item = None
-        if item is not None:
-            context.append(item)
-    return context
-
-
 def run_review(
     *,
     client: GitHubClient,
     pr_number: int,
     pr: Any,
     config: ReviewConfig,
-    provider_name: str,
-    api_key: str,
-    model: str,
+    provider_settings: ProviderSettings,
 ) -> ReviewRunResult:
-    provider = _provider_for(provider_name, api_key, model)
+    provider = _provider_for(provider_settings)
     files = client.list_pull_files(pr_number)
     filtered = [file for file in files if should_include_file(file, config)]
     filtered = filtered[: config.max_files]
-    repo_context = _load_repo_context(client, config, getattr(pr, "head_sha", None))
+    repo_context = build_repo_context(
+        client=client,
+        config=config,
+        ref=getattr(pr, "head_sha", None),
+        files=filtered,
+    )
     chunks = build_review_chunks(filtered, config.max_patch_chars)
     policy_summary = build_policy_summary(config)
 
@@ -118,7 +113,7 @@ def run_review(
             chunk=chunk,
             repo_context=repo_context,
             policy_summary=policy_summary,
-            model=model,
+            model=provider_settings.model,
         )
         raw = provider.review(prompt)
         try:

@@ -49,6 +49,16 @@ class DiffTests(unittest.TestCase):
         self.assertFalse(should_include_file(binary, config))
         self.assertFalse(should_include_file(excluded, config))
         self.assertTrue(should_include_file(include, config))
+        self.assertEqual("python", include.language)
+
+    def test_should_include_file_respects_language_filters_and_overrides(self) -> None:
+        config = ReviewConfig(include_languages=["python"], extension_overrides={".foo": "python"})
+        python_override = ChangedFile(path="scripts/task.foo", status="modified", patch="print('hi')\n")
+        js_file = ChangedFile(path="web/app.js", status="modified", patch="const x = 1;\n")
+        unknown = ChangedFile(path="notes/TODO", status="modified", patch="plain text\n")
+        self.assertTrue(should_include_file(python_override, config))
+        self.assertFalse(should_include_file(js_file, config))
+        self.assertFalse(should_include_file(unknown, config))
 
 
 if __name__ == "__main__":

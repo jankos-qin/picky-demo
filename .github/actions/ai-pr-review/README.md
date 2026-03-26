@@ -5,18 +5,21 @@ Reusable GitHub Action for AI-assisted pull request review.
 ## What it does
 
 - Reads the pull request diff from GitHub.
-- Filters files with configurable include/exclude rules.
+- Detects changed-file languages automatically with extension, filename, shebang, and light content sniffing.
+- Filters files with configurable language and path rules.
 - Skips binary, generated, and oversized patches.
-- Sends chunked diff context to a provider adapter.
+- Expands scoped repository context from manifests, related config, imports, and sibling tests.
+- Sends chunked diff context to an OpenAI-compatible provider adapter.
 - Normalizes model output into a stable finding schema.
 - Publishes inline review comments when line anchors are available.
 - Falls back to a summary comment when inline placement is not possible.
 
 ## Inputs
 
-- `provider`: provider name. `openai` is implemented first.
-- `model`: model name passed to the provider adapter.
-- `api_key`: API key for the provider.
+- `provider`: one of `deepseek`, `bcp`, or `openai`. Default: `deepseek`.
+- `model`: optional model name override. Otherwise resolved from provider-native env vars.
+- `base_url`: optional provider base URL override.
+- `api_key`: optional API key override. Otherwise resolved from provider-native env vars.
 - `config_path`: repository policy file, default `.ai-code-review.yml`.
 - `max_files`: maximum changed files to review.
 - `max_patch_chars`: maximum chars per prompt chunk.
@@ -43,13 +46,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ai-pr-review
-        with:
-          api_key: ${{ secrets.OPENAI_API_KEY }}
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_BASE_URL: ${{ vars.DEEPSEEK_BASE_URL }}
+          DEEPSEEK_CODER_MODEL: ${{ vars.DEEPSEEK_CODER_MODEL }}
 ```
 
 ## Repository policy file
 
-Create `.ai-code-review.yml` in the repository root to customize path filtering, context files, prompt guidance, and severity defaults.
+Create `.ai-code-review.yml` in the repository root to customize language filtering, scoped context gathering, prompt guidance, and severity defaults.
 
 The supported schema matches the nested structure used by the repo template:
 
@@ -57,10 +62,17 @@ The supported schema matches the nested structure used by the repo template:
 version: 1
 
 review:
+  languages:
+    mode: auto
+    review_unknown_text: false
+  context:
+    mode: scoped
+    max_files: 8
+    max_bytes: 32000
+    include_tests: true
+    include_imports: true
+    include_repo_files: true
   paths:
-    include:
-      - "**/*.py"
-      - "**/*.js"
     exclude:
       - "**/dist/**"
   generated:
@@ -77,5 +89,11 @@ review:
       - "Prioritize correctness, regressions, security, data loss, concurrency, API misuse, missing tests, and maintainability over style nitpicks."
       - "Only report findings supported by the diff or nearby repository context."
 ```
+
+Provider-native env names:
+
+- `deepseek`: `DEEPSEEK_API_KEY`, `DEEPSEEK_BASE_URL`, `DEEPSEEK_CODER_MODEL`
+- `bcp`: `BCP_API_KEY`, `BCP_BASE_URL`, `BCP_CODER_MODEL`
+- `openai`: `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_CODER_MODEL`
 
 Legacy flat keys like `include_paths` and `max_files` are still accepted for compatibility, but the nested schema above is the documented shape.

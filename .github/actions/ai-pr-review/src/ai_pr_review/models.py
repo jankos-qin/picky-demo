@@ -29,6 +29,7 @@ class ChangedFile:
     blob_url: str | None = None
     is_binary: bool = False
     is_generated: bool = False
+    language: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -36,12 +37,15 @@ class ChangedFile:
 class RepoContextFile:
     path: str
     content: str
+    reason: str = "Repository context"
+    language: str | None = None
 
 
 @dataclass(slots=True)
 class ReviewChunk:
     file_path: str
     patch: str
+    language: str | None = None
     start_line: int | None = None
     end_line: int | None = None
     original_patch: str | None = None

@@ -6,16 +6,18 @@ branding:
   color: blue
 inputs:
   provider:
-    description: AI provider to use. OpenAI is implemented first.
+    description: AI provider to use. Supported providers: deepseek, bcp, openai.
     required: false
-    default: openai
+    default: deepseek
   model:
-    description: Model name passed to the provider adapter.
+    description: Model name passed to the provider adapter. Falls back to provider-specific env vars.
     required: false
-    default: gpt-4.1-mini
+  base_url:
+    description: Override the provider base URL. Falls back to provider-specific env vars.
+    required: false
   api_key:
-    description: API key for the selected provider.
-    required: true
+    description: API key for the selected provider. Optional when a provider-native env var is available.
+    required: false
   config_path:
     description: Path to the YAML review policy file in the repository.
     required: false
@@ -50,6 +52,7 @@ runs:
         GITHUB_EVENT_PATH: ${{ github.event_path }}
         INPUT_PROVIDER: ${{ inputs.provider }}
         INPUT_MODEL: ${{ inputs.model }}
+        INPUT_BASE_URL: ${{ inputs.base_url }}
         INPUT_API_KEY: ${{ inputs.api_key }}
         INPUT_CONFIG_PATH: ${{ inputs.config_path }}
         INPUT_MAX_FILES: ${{ inputs.max_files }}
