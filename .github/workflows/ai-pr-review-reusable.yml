@@ -78,18 +78,28 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Resolve the picky source repository from the reusable workflow ref
-          WREF="${{ github.workflow_ref }}"
-          REPO="${WREF%%/.github/*}"
-          REF="${WREF##*@}"
-          echo "::debug::workflow_ref=${WREF}"
-          echo "::debug::repo=${REPO} ref=${REF}"
+          # Discover the picky source repo from the workflow run metadata.
+          # github.workflow_ref points to the CALLER, not the reusable workflow,
+          # so we query the runs API which exposes referenced_workflows.
+          RUN_DATA=$(curl -fsSL \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/runs/${{ github.run_id }}")
 
-          # Download picky source via GitHub API (works for public repos)
+          PICKY_PATH=$(echo "$RUN_DATA" | jq -r '
+            [.referenced_workflows[] |
+             select(.path | contains("ai-pr-review-reusable"))][0].path')
+          PICKY_SHA=$(echo "$RUN_DATA" | jq -r '
+            [.referenced_workflows[] |
+             select(.path | contains("ai-pr-review-reusable"))][0].sha')
+          PICKY_REPO="${PICKY_PATH%%/.github/*}"
+
+          echo "picky_repo=${PICKY_REPO} picky_sha=${PICKY_SHA}"
+
+          # Download picky source (public repo, no extra auth needed)
           PICKY_DIR=$(mktemp -d)
           curl -fsSL \
-            -H "Accept: application/vnd.github+json" \
-            "https://api.github.com/repos/${REPO}/tarball/${REF}" | \
+            "https://api.github.com/repos/${PICKY_REPO}/tarball/${PICKY_SHA}" | \
             tar xz --strip-components=1 -C "$PICKY_DIR"
 
           ACTION_DIR="$PICKY_DIR/.github/actions/ai-pr-review"
