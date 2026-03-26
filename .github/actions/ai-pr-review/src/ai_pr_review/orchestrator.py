@@ -29,7 +29,12 @@ class ReviewRunResult:
 
 def _provider_for(settings: ProviderSettings) -> ProviderAdapter:
     if settings.provider in {"openai", "deepseek", "bcp"}:
-        return OpenAIProvider(api_key=settings.api_key, model=settings.model, base_url=settings.base_url)
+        return OpenAIProvider(
+            api_key=settings.api_key,
+            model=settings.model,
+            base_url=settings.base_url,
+            preferred_api=settings.preferred_api,
+        )
     return UnsupportedProvider(settings.provider)
 
 

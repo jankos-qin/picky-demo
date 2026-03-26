@@ -14,6 +14,7 @@ class ProviderSettings:
     api_key: str
     model: str
     base_url: str | None = None
+    preferred_api: str = "responses"
 
 
 @dataclass(slots=True)
@@ -23,6 +24,7 @@ class ProviderDefinition:
     base_url_env: str | None
     model_env: str | None
     default_model: str
+    preferred_api: str = "responses"
 
 
 PROVIDERS: dict[str, ProviderDefinition] = {
@@ -32,6 +34,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         base_url_env="DEEPSEEK_BASE_URL",
         model_env="DEEPSEEK_CODER_MODEL",
         default_model="deepseek-coder",
+        preferred_api="chat_completions",
     ),
     "bcp": ProviderDefinition(
         provider="bcp",
@@ -39,6 +42,7 @@ PROVIDERS: dict[str, ProviderDefinition] = {
         base_url_env="BCP_BASE_URL",
         model_env="BCP_CODER_MODEL",
         default_model="bcp-coder",
+        preferred_api="chat_completions",
     ),
     "openai": ProviderDefinition(
         provider="openai",
@@ -86,6 +90,7 @@ def resolve_provider_settings(
         api_key=resolved_api_key,
         model=resolved_model,
         base_url=resolved_base_url,
+        preferred_api=definition.preferred_api,
     )
 
 
@@ -96,7 +101,13 @@ class ProviderAdapter(ABC):
 
 
 class OpenAIProvider(ProviderAdapter):
-    def __init__(self, api_key: str, model: str, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        base_url: str | None = None,
+        preferred_api: str = "responses",
+    ) -> None:
         try:
             from openai import OpenAI
         except ImportError as exc:  # pragma: no cover - environment specific
@@ -106,15 +117,9 @@ class OpenAIProvider(ProviderAdapter):
 
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._model = model
+        self._preferred_api = preferred_api
 
-    def review(self, prompt: ReviewPrompt) -> str:
-        user_prompt = build_prompt(
-            pr_title=prompt.pr.title,
-            pr_body=prompt.pr.body,
-            chunk=prompt.chunk,
-            repo_context=prompt.repo_context,
-            policy_summary=prompt.policy_summary,
-        )
+    def _review_via_responses(self, user_prompt: str) -> str:
         response = self._client.responses.create(
             model=self._model,
             input=[
@@ -132,6 +137,49 @@ class OpenAIProvider(ProviderAdapter):
                 if getattr(content, "type", "") == "output_text":
                     texts.append(getattr(content, "text", ""))
         return "\n".join(texts)
+
+    def _review_via_chat_completions(self, user_prompt: str) -> str:
+        response = self._client.chat.completions.create(
+            model=self._model,
+            response_format={"type": "json_object"},
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
+        choices = getattr(response, "choices", []) or []
+        texts: list[str] = []
+        for choice in choices:
+            message = getattr(choice, "message", None)
+            content = getattr(message, "content", None)
+            if isinstance(content, str):
+                texts.append(content)
+            elif isinstance(content, list):
+                for item in content:
+                    if isinstance(item, dict) and item.get("type") == "text":
+                        texts.append(str(item.get("text", "")))
+                    else:
+                        text_value = getattr(item, "text", None)
+                        if text_value:
+                            texts.append(str(text_value))
+        return "\n".join(texts)
+
+    def review(self, prompt: ReviewPrompt) -> str:
+        user_prompt = build_prompt(
+            pr_title=prompt.pr.title,
+            pr_body=prompt.pr.body,
+            chunk=prompt.chunk,
+            repo_context=prompt.repo_context,
+            policy_summary=prompt.policy_summary,
+        )
+        if self._preferred_api == "chat_completions":
+            return self._review_via_chat_completions(user_prompt)
+        try:
+            return self._review_via_responses(user_prompt)
+        except Exception as exc:
+            if exc.__class__.__name__ != "NotFoundError":
+                raise
+            return self._review_via_chat_completions(user_prompt)
 
 
 class UnsupportedProvider(ProviderAdapter):
