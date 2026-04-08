@@ -4,8 +4,11 @@ import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from .logging_utils import get_logger
 from .models import ReviewPrompt
 from .prompting import SYSTEM_PROMPT, build_prompt
+
+LOGGER = get_logger("providers")
 
 
 @dataclass(slots=True)
@@ -118,8 +121,19 @@ class OpenAIProvider(ProviderAdapter):
         self._client = OpenAI(api_key=api_key, base_url=base_url)
         self._model = model
         self._preferred_api = preferred_api
+        LOGGER.info(
+            "Initialized provider client model=%s preferred_api=%s base_url=%s",
+            model,
+            preferred_api,
+            base_url,
+        )
 
     def _review_via_responses(self, user_prompt: str) -> str:
+        LOGGER.info(
+            "Calling responses API model=%s prompt_chars=%s",
+            self._model,
+            len(user_prompt),
+        )
         response = self._client.responses.create(
             model=self._model,
             input=[
@@ -139,6 +153,11 @@ class OpenAIProvider(ProviderAdapter):
         return "\n".join(texts)
 
     def _review_via_chat_completions(self, user_prompt: str) -> str:
+        LOGGER.info(
+            "Calling chat.completions API model=%s prompt_chars=%s",
+            self._model,
+            len(user_prompt),
+        )
         response = self._client.chat.completions.create(
             model=self._model,
             response_format={"type": "json_object"},
@@ -179,7 +198,9 @@ class OpenAIProvider(ProviderAdapter):
             return self._review_via_responses(user_prompt)
         except Exception as exc:
             if exc.__class__.__name__ != "NotFoundError":
+                LOGGER.exception("Provider request failed without fallback")
                 raise
+            LOGGER.warning("Responses API unavailable; falling back to chat.completions")
             return self._review_via_chat_completions(user_prompt)
 
 

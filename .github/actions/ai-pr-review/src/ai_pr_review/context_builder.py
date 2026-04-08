@@ -6,7 +6,10 @@ from typing import Iterable
 
 from .config import DEFAULT_CONTEXT_FILES, ReviewConfig
 from .detector import detect_language
+from .logging_utils import get_logger
 from .models import ChangedFile, RepoContextFile
+
+LOGGER = get_logger("context_builder")
 
 
 IMPORT_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
@@ -175,6 +178,7 @@ def build_repo_context(
         try:
             return client.get_repo_file(path, ref)
         except Exception:
+            LOGGER.exception("Failed to fetch repo context file path=%s ref=%s", path, ref)
             return None
 
     if config.context_include_repo_files:

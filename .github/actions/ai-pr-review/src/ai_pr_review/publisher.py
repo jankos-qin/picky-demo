@@ -4,9 +4,11 @@ import hashlib
 from dataclasses import dataclass
 
 from .github_client import GitHubClient, GitHubComment
+from .logging_utils import get_logger
 from .models import Finding, SEVERITY_ORDER
 
 FINGERPRINT_PREFIX = "<!-- ai-pr-review:"
+LOGGER = get_logger("publisher")
 LOCALIZED_STRINGS = {
     "en": {
         "inline_prefix": "Picky",
@@ -171,10 +173,24 @@ def publish(
     result = PublishResult()
     threshold = SEVERITY_ORDER[min_severity_to_publish]
     publishable = [f for f in findings if SEVERITY_ORDER.get(f.severity, 0) >= threshold]
+    LOGGER.info(
+        "Preparing publish findings=%s publishable=%s threshold=%s commit_id_present=%s post_summary=%s",
+        len(findings),
+        len(publishable),
+        min_severity_to_publish,
+        bool(commit_id),
+        post_summary,
+    )
     existing_review_comments = client.list_review_comments(pr_number)
     existing_issue_comments = client.list_issue_comments(pr_number)
     existing_comments = [*existing_review_comments, *existing_issue_comments]
     publishable = dedupe_against_existing(publishable, existing_comments)
+    LOGGER.info(
+        "Deduped publishable findings remaining=%s existing_review_comments=%s existing_issue_comments=%s",
+        len(publishable),
+        len(existing_review_comments),
+        len(existing_issue_comments),
+    )
 
     inline_findings = [
         finding for finding in publishable if finding.line is not None and finding.path and commit_id
@@ -191,6 +207,7 @@ def publish(
         if not post_summary:
             review_body = _strings(review_language)["summary_title"]
         try:
+            LOGGER.info("Creating pull review inline_comments=%s", len(inline_findings))
             client.create_pull_review(
                 pr_number,
                 commit_id,
@@ -200,6 +217,7 @@ def publish(
             result.posted_inline = inline_count
             result.posted_summary = post_summary
         except Exception:
+            LOGGER.exception("Pull review submission failed; falling back to issue comment")
             client.create_issue_comment(
                 pr_number,
                 build_summary_comment(publishable, pr_title, review_language=review_language),
@@ -207,6 +225,7 @@ def publish(
             result.posted_summary = True
             result.posted_inline = 0
     elif publishable and post_summary:
+        LOGGER.info("Creating issue summary comment findings=%s", len(publishable))
         client.create_issue_comment(
             pr_number,
             build_summary_comment(publishable, pr_title, review_language=review_language),
@@ -214,7 +233,14 @@ def publish(
         result.posted_summary = True
         result.posted_inline = 0
     elif summary_findings and not post_summary:
+        LOGGER.info("Skipping summary publication because post_summary=false")
         result.posted_inline = 0
 
     result.skipped_duplicate = len(findings) - len(publishable)
+    LOGGER.info(
+        "Publish result posted_inline=%s posted_summary=%s skipped_duplicate=%s",
+        result.posted_inline,
+        result.posted_summary,
+        result.skipped_duplicate,
+    )
     return result

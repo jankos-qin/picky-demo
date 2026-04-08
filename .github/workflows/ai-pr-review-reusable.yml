@@ -77,12 +77,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          set -x
 
           # Discover the picky source repo by parsing the caller's workflow.
           # The caller's repo is already checked out and must contain a
           #   uses: owner/repo/.github/workflows/ai-pr-review-reusable.yml@ref
           # line — we extract owner/repo and ref from it.
           USES_LINE=$(grep -rh "ai-pr-review-reusable\.yml@" .github/workflows/ 2>/dev/null | grep -v "^[[:space:]]*#" | head -1 || true)
+          echo "::notice::Detected reusable workflow reference line: ${USES_LINE}"
 
           if [ -z "$USES_LINE" ]; then
             echo "::error::Could not find a reference to ai-pr-review-reusable.yml in .github/workflows/"
@@ -91,6 +93,7 @@ jobs:
 
           PICKY_REPO=$(echo "$USES_LINE" | sed -n 's|.*uses:[[:space:]]*\([^/]*/[^/]*\)/.github/workflows/ai-pr-review-reusable\.yml@.*|\1|p')
           PICKY_REF=$(echo "$USES_LINE" | sed -n 's|.*ai-pr-review-reusable\.yml@\([^[:space:]"'"'"']*\).*|\1|p')
+          echo "::notice::Resolved picky repo=${PICKY_REPO} ref=${PICKY_REF}"
 
           if [ -z "$PICKY_REPO" ] || [ -z "$PICKY_REF" ]; then
             echo "::error::Could not parse repo/ref from: ${USES_LINE}"
@@ -99,14 +102,18 @@ jobs:
 
           # Download picky source (public repo, no auth needed)
           PICKY_DIR=$(mktemp -d)
+          echo "::notice::Downloading picky source into ${PICKY_DIR}"
           curl -fsSL \
             "https://github.com/${PICKY_REPO}/archive/${PICKY_REF}.tar.gz" | \
             tar xz --strip-components=1 -C "$PICKY_DIR"
 
           ACTION_DIR="$PICKY_DIR/.github/actions/ai-pr-review"
+          echo "::notice::Using action dir ${ACTION_DIR}"
 
           # Install dependencies and run review
+          echo "::notice::Installing action dependencies"
           python3 -m pip install -r "$ACTION_DIR/requirements.txt"
+          echo "::notice::Starting review module"
           PYTHONPATH="$ACTION_DIR/src" python3 -m ai_pr_review
         env:
           GITHUB_TOKEN: ${{ github.token }}

@@ -8,6 +8,7 @@ from .config import ReviewConfig
 from .context_builder import build_repo_context
 from .diff import build_review_chunks, should_include_file
 from .github_client import GitHubClient
+from .logging_utils import get_logger
 from .models import Finding, ReviewPrompt
 from .prompting import build_policy_summary
 from .providers import (
@@ -17,6 +18,8 @@ from .providers import (
     UnsupportedProvider,
 )
 from .publisher import finding_fingerprint
+
+LOGGER = get_logger("orchestrator")
 
 
 @dataclass(slots=True)
@@ -100,19 +103,37 @@ def run_review(
 ) -> ReviewRunResult:
     provider = _provider_for(provider_settings)
     files = client.list_pull_files(pr_number)
+    LOGGER.info("Fetched changed files count=%s for pr=%s", len(files), pr_number)
     filtered = [file for file in files if should_include_file(file, config)]
+    skipped_by_filter = len(files) - len(filtered)
     filtered = filtered[: config.max_files]
+    LOGGER.info(
+        "Selected files for review filtered=%s skipped_by_filter=%s max_files=%s",
+        len(filtered),
+        skipped_by_filter,
+        config.max_files,
+    )
     repo_context = build_repo_context(
         client=client,
         config=config,
         ref=getattr(pr, "head_sha", None),
         files=filtered,
     )
+    LOGGER.info("Built repo context items=%s", len(repo_context))
     chunks = build_review_chunks(filtered, config.max_patch_chars)
+    LOGGER.info("Built review chunks count=%s max_patch_chars=%s", len(chunks), config.max_patch_chars)
     policy_summary = build_policy_summary(config)
 
     findings: list[Finding] = []
-    for chunk in chunks:
+    for index, chunk in enumerate(chunks, start=1):
+        LOGGER.info(
+            "Reviewing chunk %s/%s file=%s language=%s patch_chars=%s",
+            index,
+            len(chunks),
+            chunk.file_path,
+            chunk.language,
+            len(chunk.patch),
+        )
         prompt = ReviewPrompt(
             pr=pr,
             chunk=chunk,
@@ -122,11 +143,26 @@ def run_review(
             review_language=config.review_language,
         )
         raw = provider.review(prompt)
+        LOGGER.info("Provider returned %s chars for file=%s", len(raw), chunk.file_path)
         try:
             payload = _extract_json(raw)
         except Exception:
+            LOGGER.exception(
+                "Failed to parse provider response as JSON for file=%s chunk=%s/%s",
+                chunk.file_path,
+                index,
+                len(chunks),
+            )
             continue
-        findings.extend(normalize_findings(payload, chunk.file_path))
+        normalized = normalize_findings(payload, chunk.file_path)
+        LOGGER.info(
+            "Normalized findings count=%s for file=%s chunk=%s/%s",
+            len(normalized),
+            chunk.file_path,
+            index,
+            len(chunks),
+        )
+        findings.extend(normalized)
 
     unique: list[Finding] = []
     seen: set[str] = set()
@@ -135,6 +171,7 @@ def run_review(
             continue
         seen.add(finding.fingerprint)
         unique.append(finding)
+    LOGGER.info("Deduped findings raw=%s unique=%s", len(findings), len(unique))
 
     return ReviewRunResult(
         findings=unique,

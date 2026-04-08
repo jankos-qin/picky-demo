@@ -8,7 +8,10 @@ from urllib.error import HTTPError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from .logging_utils import get_logger
 from .models import ChangedFile, PullRequestInfo, RepoContextFile
+
+LOGGER = get_logger("github")
 
 
 @dataclass(slots=True)
@@ -29,6 +32,7 @@ class GitHubClient:
         self._file_cache: dict[tuple[str, str], RepoContextFile | None] = {}
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
+        LOGGER.info("GitHub API request method=%s path=%s payload_keys=%s", method, path, sorted((payload or {}).keys()))
         data = None if payload is None else json.dumps(payload).encode("utf-8")
         request = Request(
             f"{self._api_base}{path}",
@@ -44,9 +48,11 @@ class GitHubClient:
         try:
             with urlopen(request) as response:
                 body = response.read().decode("utf-8")
+                LOGGER.info("GitHub API response method=%s path=%s status=%s", method, path, getattr(response, "status", "unknown"))
                 return json.loads(body) if body else None
         except HTTPError as exc:
             body = exc.read().decode("utf-8") if exc.fp else ""
+            LOGGER.error("GitHub API request failed method=%s path=%s status=%s body=%s", method, path, exc.code, body)
             raise RuntimeError(f"GitHub API request failed: {method} {path}: {exc.code} {body}") from exc
 
     def get_pull_request(self, number: int) -> PullRequestInfo:
