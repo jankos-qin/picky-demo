@@ -30,6 +30,7 @@ class GitHubClient:
         self._repository = repository
         self._api_base = api_base.rstrip("/")
         self._file_cache: dict[tuple[str, str], RepoContextFile | None] = {}
+        self._commit_files_cache: dict[str, list[ChangedFile]] = {}
 
     def _request(self, method: str, path: str, payload: dict[str, Any] | None = None) -> Any:
         LOGGER.info("GitHub API request method=%s path=%s payload_keys=%s", method, path, sorted((payload or {}).keys()))
@@ -94,6 +95,56 @@ class GitHubClient:
             if len(data) < 100:
                 break
             page += 1
+        return files
+
+    def list_pull_commits(self, number: int) -> list[str]:
+        commits: list[str] = []
+        page = 1
+        while True:
+            data = self._request(
+                "GET",
+                f"/repos/{self._repository}/pulls/{number}/commits?per_page=100&page={page}",
+            )
+            if not data:
+                break
+            for item in data:
+                sha = str(item.get("sha", "")).strip()
+                if sha:
+                    commits.append(sha)
+            if len(data) < 100:
+                break
+            page += 1
+        return commits
+
+    def get_commit_files(self, commit_sha: str) -> list[ChangedFile]:
+        if commit_sha in self._commit_files_cache:
+            return list(self._commit_files_cache[commit_sha])
+        data = self._request(
+            "GET",
+            f"/repos/{self._repository}/commits/{quote(commit_sha, safe='')}",
+        )
+        files: list[ChangedFile] = []
+        for item in (data or {}).get("files", []) or []:
+            metadata = dict(item)
+            path = item.get("filename", "")
+            previous = item.get("previous_filename")
+            if previous:
+                metadata["previous_filename"] = previous
+            files.append(
+                ChangedFile(
+                    path=path,
+                    status=item.get("status", ""),
+                    additions=item.get("additions", 0) or 0,
+                    deletions=item.get("deletions", 0) or 0,
+                    changes=item.get("changes", 0) or 0,
+                    patch=item.get("patch"),
+                    raw_url=item.get("raw_url"),
+                    blob_url=item.get("blob_url"),
+                    is_binary=not bool(item.get("patch")) and item.get("status") != "removed",
+                    metadata=metadata,
+                )
+            )
+        self._commit_files_cache[commit_sha] = list(files)
         return files
 
     def get_repo_file(self, path: str, ref: str) -> RepoContextFile | None:

@@ -97,6 +97,7 @@ class PublisherTests(unittest.TestCase):
             title="Unsafe branch",
             body="The new branch is unsafe.",
             suggested_fix="Add a guard.",
+            commit_id="commit-1",
         )
         client = FakeClient()
         result = publish(
@@ -111,9 +112,10 @@ class PublisherTests(unittest.TestCase):
         )
         self.assertEqual(1, result.posted_inline)
         self.assertTrue(result.posted_summary)
-        self.assertEqual(0, len(client.inline_calls))
-        self.assertEqual(1, len(client.review_calls))
-        self.assertEqual(0, len(client.issue_calls))
+        self.assertEqual(1, len(client.inline_calls))
+        self.assertEqual("commit-1", client.inline_calls[0][4])
+        self.assertEqual(0, len(client.review_calls))
+        self.assertEqual(1, len(client.issue_calls))
         self.assertIn("## Picky", build_summary_comment([finding], "Update logic"))
 
     def test_publish_falls_back_to_summary_when_review_submission_fails(self) -> None:
@@ -125,9 +127,15 @@ class PublisherTests(unittest.TestCase):
             title="Unsafe branch",
             body="The new branch is unsafe.",
             suggested_fix="Add a guard.",
+            commit_id="commit-1",
         )
         client = FakeClient()
-        client.fail_review = True
+        original_create_review_comment = client.create_review_comment
+
+        def fail_review_comment(number: int, body: str, path: str, line: int, commit_id: str):
+            raise RuntimeError("review failed")
+
+        client.create_review_comment = fail_review_comment
         result = publish(
             client=client,
             pr_number=12,
@@ -141,6 +149,7 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(0, result.posted_inline)
         self.assertTrue(result.posted_summary)
         self.assertEqual(1, len(client.issue_calls))
+        client.create_review_comment = original_create_review_comment
 
     def test_publish_posts_summary_when_findings_are_unanchored(self) -> None:
         finding = Finding(
@@ -166,6 +175,32 @@ class PublisherTests(unittest.TestCase):
         self.assertEqual(0, result.posted_inline)
         self.assertTrue(result.posted_summary)
         self.assertEqual(1, len(client.issue_calls))
+
+    def test_publish_uses_finding_commit_id_over_pr_head(self) -> None:
+        finding = Finding(
+            path="src/app.py",
+            line=8,
+            severity="high",
+            confidence=0.9,
+            title="Unsafe branch",
+            body="The new branch is unsafe.",
+            commit_id="commit-2",
+        )
+        client = FakeClient()
+        result = publish(
+            client=client,
+            pr_number=12,
+            commit_id="sha123",
+            findings=[finding],
+            pr_title="Update logic",
+            post_summary=False,
+            min_severity_to_publish="low",
+            review_language="en",
+        )
+        self.assertEqual(1, result.posted_inline)
+        self.assertEqual(1, len(client.inline_calls))
+        self.assertEqual("commit-2", client.inline_calls[0][4])
+        self.assertFalse(result.posted_summary)
 
 
 if __name__ == "__main__":

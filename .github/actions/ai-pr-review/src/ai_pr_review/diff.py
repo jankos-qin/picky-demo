@@ -158,6 +158,19 @@ def parse_unified_diff(patch: str) -> list[DiffHunk]:
     return hunks
 
 
+def patch_contains_line(patch: str | None, line_number: int | None) -> bool:
+    if not patch or line_number is None:
+        return False
+    for hunk in parse_unified_diff(patch):
+        start = hunk.start_line
+        end = hunk.end_line
+        if start is None or end is None:
+            continue
+        if start <= line_number <= end:
+            return True
+    return False
+
+
 def _parse_hunk_range(part: str) -> tuple[int, int]:
     cleaned = part.lstrip("-+")
     if "," in cleaned:

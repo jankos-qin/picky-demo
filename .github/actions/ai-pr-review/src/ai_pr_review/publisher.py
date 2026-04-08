@@ -72,6 +72,7 @@ def with_fingerprint(finding: Finding) -> Finding:
         body=finding.body,
         suggested_fix=finding.suggested_fix,
         fingerprint=fp,
+        commit_id=finding.commit_id,
     )
 
 
@@ -192,38 +193,54 @@ def publish(
         len(existing_issue_comments),
     )
 
-    inline_findings = [
-        finding for finding in publishable if finding.line is not None and finding.path and commit_id
-    ]
+    inline_findings = [finding for finding in publishable if finding.line is not None and finding.path]
     summary_findings = [finding for finding in publishable if finding not in inline_findings]
     inline_count = len(inline_findings)
 
-    if inline_findings and commit_id:
-        review_body = (
-            build_summary_comment(publishable, pr_title, review_language=review_language)
-            if post_summary
-            else _strings(review_language)["summary_title"]
-        )
-        if not post_summary:
-            review_body = _strings(review_language)["summary_title"]
-        try:
-            LOGGER.info("Creating pull review inline_comments=%s", len(inline_findings))
-            client.create_pull_review(
-                pr_number,
-                commit_id,
-                review_body,
-                [build_review_payload_comment(finding, review_language=review_language) for finding in inline_findings],
-            )
-            result.posted_inline = inline_count
-            result.posted_summary = post_summary
-        except Exception:
-            LOGGER.exception("Pull review submission failed; falling back to issue comment")
+    if inline_findings:
+        posted_inline = 0
+        for finding in inline_findings:
+            comment_commit_id = finding.commit_id or commit_id
+            if not comment_commit_id:
+                LOGGER.warning(
+                    "Skipping inline comment without commit_id path=%s line=%s title=%r",
+                    finding.path,
+                    finding.line,
+                    finding.title,
+                )
+                summary_findings.append(finding)
+                continue
+            try:
+                LOGGER.info(
+                    "Creating review comment path=%s line=%s commit_id=%s",
+                    finding.path,
+                    finding.line,
+                    comment_commit_id,
+                )
+                client.create_review_comment(
+                    pr_number,
+                    build_inline_comment(finding, review_language=review_language),
+                    finding.path,
+                    int(finding.line or 0),
+                    comment_commit_id,
+                )
+                posted_inline += 1
+            except Exception:
+                LOGGER.exception(
+                    "Inline review comment failed; moving finding to summary path=%s line=%s commit_id=%s",
+                    finding.path,
+                    finding.line,
+                    comment_commit_id,
+                )
+                summary_findings.append(finding)
+        result.posted_inline = posted_inline
+        if post_summary and publishable:
+            LOGGER.info("Creating issue summary comment findings=%s", len(publishable))
             client.create_issue_comment(
                 pr_number,
                 build_summary_comment(publishable, pr_title, review_language=review_language),
             )
             result.posted_summary = True
-            result.posted_inline = 0
     elif publishable and post_summary:
         LOGGER.info("Creating issue summary comment findings=%s", len(publishable))
         client.create_issue_comment(

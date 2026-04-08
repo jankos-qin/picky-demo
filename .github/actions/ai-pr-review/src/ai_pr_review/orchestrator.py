@@ -6,7 +6,7 @@ from typing import Any
 
 from .config import ReviewConfig
 from .context_builder import build_repo_context
-from .diff import build_review_chunks, should_include_file
+from .diff import build_review_chunks, patch_contains_line, should_include_file
 from .github_client import GitHubClient
 from .logging_utils import get_logger
 from .models import Finding, ReviewPrompt
@@ -172,6 +172,7 @@ def run_review(
         seen.add(finding.fingerprint)
         unique.append(finding)
     LOGGER.info("Deduped findings raw=%s unique=%s", len(findings), len(unique))
+    _assign_finding_commits(client=client, pr_number=pr_number, findings=unique)
 
     return ReviewRunResult(
         findings=unique,
@@ -179,3 +180,68 @@ def run_review(
         files_reviewed=len(filtered),
         files_skipped=max(0, len(files) - len(filtered)),
     )
+
+
+def _assign_finding_commits(
+    *,
+    client: GitHubClient,
+    pr_number: int,
+    findings: list[Finding],
+) -> None:
+    if not findings:
+        return
+    try:
+        commit_shas = client.list_pull_commits(pr_number)
+    except Exception:
+        LOGGER.exception("Failed to list pull request commits for pr=%s", pr_number)
+        return
+    if not commit_shas:
+        LOGGER.warning("No commits returned for pr=%s during finding attribution", pr_number)
+        return
+
+    LOGGER.info("Attributing findings across %s commits", len(commit_shas))
+    commit_files: list[tuple[str, list[Any]]] = []
+    for sha in commit_shas:
+        try:
+            files = client.get_commit_files(sha)
+        except Exception:
+            LOGGER.exception("Failed to fetch commit files for sha=%s", sha)
+            continue
+        commit_files.append((sha, files))
+
+    for finding in findings:
+        finding.commit_id = _find_commit_for_finding(finding, commit_files)
+        LOGGER.info(
+            "Attributed finding path=%s line=%s title=%r commit_id=%s",
+            finding.path,
+            finding.line,
+            finding.title,
+            finding.commit_id,
+        )
+
+
+def _find_commit_for_finding(
+    finding: Finding,
+    commit_files: list[tuple[str, list[Any]]],
+) -> str | None:
+    path_matches: list[str] = []
+    line_matches: list[str] = []
+
+    for sha, files in commit_files:
+        for changed_file in files:
+            candidate_paths = [changed_file.path]
+            previous_path = changed_file.metadata.get("previous_filename")
+            if previous_path:
+                candidate_paths.append(str(previous_path))
+            if finding.path not in candidate_paths:
+                continue
+            path_matches.append(sha)
+            if patch_contains_line(changed_file.patch, finding.line):
+                line_matches.append(sha)
+            break
+
+    if line_matches:
+        return line_matches[-1]
+    if path_matches:
+        return path_matches[-1]
+    return None

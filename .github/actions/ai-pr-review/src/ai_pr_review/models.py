@@ -71,6 +71,7 @@ class Finding:
     body: str
     suggested_fix: str = ""
     fingerprint: str = ""
+    commit_id: str | None = None
 
     def normalized(self) -> "Finding":
         return Finding(
@@ -82,4 +83,5 @@ class Finding:
             body=self.body.strip(),
             suggested_fix=self.suggested_fix.strip(),
             fingerprint=self.fingerprint.strip(),
+            commit_id=(self.commit_id or "").strip() or None,
         )

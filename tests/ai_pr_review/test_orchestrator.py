@@ -27,9 +27,32 @@ class FakeClient:
         self.files = files
         self.context = context or {}
         self.requested_files: list[str] = []
+        self.pull_commits: list[str] = ["commit-1", "commit-2"]
+        self.commit_files: dict[str, list[ChangedFile]] = {
+            "commit-1": [
+                ChangedFile(
+                    path="src/app.py",
+                    status="modified",
+                    patch="@@ -1,1 +1,2 @@\n old\n+early\n",
+                )
+            ],
+            "commit-2": [
+                ChangedFile(
+                    path="src/app.py",
+                    status="modified",
+                    patch="@@ -2,1 +2,2 @@\n old\n+late\n",
+                )
+            ],
+        }
 
     def list_pull_files(self, number: int):
         return list(self.files)
+
+    def list_pull_commits(self, number: int):
+        return list(self.pull_commits)
+
+    def get_commit_files(self, sha: str):
+        return list(self.commit_files.get(sha, []))
 
     def get_repo_file(self, path: str, ref: str):
         self.requested_files.append(path)
@@ -121,6 +144,7 @@ class OrchestratorTests(unittest.TestCase):
         self.assertGreaterEqual(result.chunks_reviewed, 1)
         self.assertEqual(1, len(result.findings))
         self.assertEqual("src/app.py", result.findings[0].path)
+        self.assertEqual("commit-2", result.findings[0].commit_id)
         self.assertEqual(2, len(fake_provider.prompts))
         self.assertEqual("python", fake_provider.prompts[0].chunk.language)
         self.assertEqual("zh-CN", fake_provider.prompts[0].review_language)
@@ -128,6 +152,41 @@ class OrchestratorTests(unittest.TestCase):
         self.assertTrue(any(item.reason == "Imported module" for item in fake_provider.prompts[0].repo_context))
         self.assertIn("README.md", fake_client.requested_files)
         self.assertIn("src/helpers.py", fake_client.requested_files)
+
+    def test_run_review_assigns_commit_by_file_when_line_missing(self) -> None:
+        files = [ChangedFile(path="src/app.py", status="modified", patch="@@ -1,1 +1,1 @@\n-old\n+new\n")]
+        fake_client = FakeClient(files)
+        response = json.dumps(
+            {
+                "findings": [
+                    {
+                        "path": "src/app.py",
+                        "severity": "medium",
+                        "confidence": 0.7,
+                        "title": "General issue",
+                        "body": "Needs attention.",
+                    }
+                ]
+            }
+        )
+        config = ReviewConfig(max_files=5, max_patch_chars=200)
+        pr = PullRequestInfo(number=1, title="Update logic", body="body", head_sha="abc123")
+
+        fake_provider = FakeProvider(response)
+        with patch("ai_pr_review.orchestrator._provider_for", return_value=fake_provider):
+            result = run_review(
+                client=fake_client,
+                pr_number=1,
+                pr=pr,
+                config=config,
+                provider_settings=ProviderSettings(
+                    provider="openai",
+                    api_key="secret",
+                    model="gpt-test",
+                ),
+            )
+
+        self.assertEqual("commit-2", result.findings[0].commit_id)
 
 
 if __name__ == "__main__":
