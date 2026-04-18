@@ -8,7 +8,9 @@ from .models import RepoContextFile, ReviewChunk
 
 SYSTEM_PROMPT = """You are an expert GitHub code reviewer.
 Focus on correctness, regressions, security, data loss, concurrency, API misuse, missing tests, and maintainability.
-Ignore style nits unless they hide a bug or meaningful risk.
+Ignore naming, formatting, and preference-only style nits.
+Do report maintainability or interface issues when they create concrete engineering risk, such as brittle magic numbers,
+public API or header contract drift, hidden units or limits, duplicated business rules, or implicit cross-file coupling.
 Use only evidence from the provided diff and scoped repo context.
 The context may be partial. Reason across files when the evidence supports it, and avoid speculation when context is missing.
 Write the finding title, body, and suggested_fix in the requested review language.
@@ -22,6 +24,24 @@ Rules:
 - If no line anchor is appropriate, omit the finding rather than guessing.
 - Return an empty findings array when nothing actionable is found.
 """
+
+
+def _review_checklist(file_path: str, language: str | None) -> str:
+    checks = [
+        "- Report maintainability findings when they create concrete risk, not when they are mere style preferences.",
+        "- Flag magic numbers only when they encode meaningful limits, units, protocol values, retry behavior, buffer sizes, bit masks, or business rules that should likely be named or centralized.",
+        "- Treat duplicated literals or policy constants across files as actionable when they can drift out of sync.",
+        "- Treat public API, declaration, and header-surface changes as high-signal review areas when callers, implementations, ownership rules, or visibility can diverge.",
+        "- Prefer findings tied to future regression risk, confusing contracts, or missing tests over cosmetic cleanup suggestions.",
+    ]
+    if language in {"c", "cpp"} or file_path.endswith((".h", ".hpp", ".hh", ".hxx")):
+        checks.extend(
+            [
+                "- For C/C++ and header files, check declaration/definition mismatches, missing direct includes, transitive-include dependence, macro leakage, and public/private header placement.",
+                "- Flag ABI- or contract-affecting signature changes when declarations, implementations, or dependent callers may no longer agree.",
+            ]
+        )
+    return "\n".join(checks)
 
 
 def build_policy_summary(config: ReviewConfig) -> str:
@@ -62,6 +82,8 @@ def build_prompt(
         f"Changed file: {chunk.file_path}",
         f"Detected language: {chunk.language or '<unknown>'}",
         f"Line window: {chunk.start_line or 'n/a'}-{chunk.end_line or 'n/a'}",
+        "Review checklist:",
+        _review_checklist(chunk.file_path, chunk.language),
         "Patch:",
         chunk.patch,
     ]

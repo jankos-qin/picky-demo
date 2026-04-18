@@ -9,6 +9,7 @@ Reusable GitHub Action for Picky pull request review.
 - Filters files with configurable language and path rules.
 - Skips binary, generated, and oversized patches.
 - Expands scoped repository context from manifests, related config, imports, and sibling tests.
+- Adds interface-aware context for C/C++ header and implementation counterparts when available.
 - Sends chunked diff context to an OpenAI-compatible provider adapter.
 - Normalizes model output into a stable finding schema.
 - Publishes inline review comments when line anchors are available.
@@ -92,6 +93,8 @@ review:
     extensions:
       - "Prioritize correctness, regressions, security, data loss, concurrency, API misuse, missing tests, and maintainability over style nitpicks."
       - "Only report findings supported by the diff or nearby repository context."
+      - "Flag magic numbers, duplicated policy literals, and unnamed units only when they create real maintenance or regression risk."
+      - "For public headers and API boundaries, check declaration consistency, direct includes, visibility, and caller-facing contract drift."
 ```
 
 Provider-native env names:

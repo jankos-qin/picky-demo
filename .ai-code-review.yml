@@ -48,3 +48,5 @@ review:
       - "Prioritize correctness, regressions, security, data loss, concurrency, API misuse, missing tests, and maintainability over style nitpicks."
       - "Only report findings supported by the diff or nearby repository context."
       - "Treat cross-file interface changes as one system even if the bug appears in only one file."
+      - "Flag magic numbers, duplicated policy literals, and unnamed units only when they create real maintenance or regression risk."
+      - "For public headers and API boundaries, check declaration consistency, direct includes, visibility, and caller-facing contract drift."

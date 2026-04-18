@@ -34,10 +34,43 @@ IMPORT_PATTERNS: dict[str, tuple[re.Pattern[str], ...]] = {
         re.compile(r"require\(['\"]([^'\"]+)['\"]\)"),
     ),
     "go": (re.compile(r"^\s*import\s+\"([^\"]+)\"", re.MULTILINE),),
+    "c": (
+        re.compile(r"^\s*#\s*include\s+\"([^\"]+)\"", re.MULTILINE),
+        re.compile(r"^\s*#\s*include\s+<([^>]+)>", re.MULTILINE),
+    ),
+    "cpp": (
+        re.compile(r"^\s*#\s*include\s+\"([^\"]+)\"", re.MULTILINE),
+        re.compile(r"^\s*#\s*include\s+<([^>]+)>", re.MULTILINE),
+    ),
 }
 
-SOURCE_EXTENSIONS = (".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".rs", ".java", ".rb", ".php")
+SOURCE_EXTENSIONS = (
+    ".py",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".go",
+    ".rs",
+    ".java",
+    ".rb",
+    ".php",
+    ".c",
+    ".cc",
+    ".cpp",
+    ".cxx",
+)
 TEST_MARKERS = ("test_", "_test", ".spec.", ".test.")
+HEADER_EXTENSIONS = (".h", ".hh", ".hpp", ".hxx")
+IMPLEMENTATION_EXTENSIONS = (".c", ".cc", ".cpp", ".cxx")
+INTERFACE_ROOT_MIRRORS: dict[str, tuple[str, ...]] = {
+    "src": ("include", "inc", "public"),
+    "source": ("include", "inc", "public"),
+    "lib": ("include", "inc", "public"),
+    "include": ("src", "source", "lib"),
+    "inc": ("src", "source", "lib"),
+    "public": ("src", "source", "lib"),
+}
 CONFIG_FILENAMES = (
     "package.json",
     "tsconfig.json",
@@ -141,6 +174,12 @@ def _candidate_import_paths(import_name: str, base_path: str, language: str | No
         candidates.append(target_path + "/__init__.py")
     elif language == "go":
         candidates.append(import_name)
+    elif language in {"c", "cpp"}:
+        base_dir = PurePosixPath(base_path).parent
+        candidates.append((base_dir / import_name).as_posix())
+        candidates.append(import_name)
+        for prefix in ("include", "inc", "public", "src", "source", "lib"):
+            candidates.append(f"{prefix}/{import_name}")
     return candidates
 
 
@@ -158,6 +197,36 @@ def _extract_import_candidates(file_content: str, file_path: str, language: str 
         if language in {"javascript", "jsx", "typescript", "tsx"} and not item.startswith((".", "/")):
             continue
         candidates.extend(_candidate_import_paths(item, file_path, language))
+    return candidates
+
+
+def _guess_related_interface_files(path: str) -> list[str]:
+    pure_path = PurePosixPath(path)
+    suffix = pure_path.suffix.lower()
+    stem = pure_path.stem
+    parent = pure_path.parent
+    candidates: list[str] = []
+
+    if suffix in HEADER_EXTENSIONS:
+        counterpart_suffixes = IMPLEMENTATION_EXTENSIONS
+    elif suffix in IMPLEMENTATION_EXTENSIONS:
+        counterpart_suffixes = HEADER_EXTENSIONS
+    else:
+        return candidates
+
+    for candidate_suffix in counterpart_suffixes:
+        candidates.append((parent / f"{stem}{candidate_suffix}").as_posix())
+
+    parts = list(pure_path.parts)
+    for index, part in enumerate(parts[:-1]):
+        mirrors = INTERFACE_ROOT_MIRRORS.get(part)
+        if not mirrors:
+            continue
+        tail = parts[index + 1 : -1]
+        for root in mirrors:
+            for candidate_suffix in counterpart_suffixes:
+                candidates.append(str(PurePosixPath(*parts[:index], root, *tail, f"{stem}{candidate_suffix}")))
+
     return candidates
 
 
@@ -233,6 +302,22 @@ def build_repo_context(
                     max_files=config.context_max_files,
                     max_bytes=config.context_max_bytes,
                 )
+
+        for path in _guess_related_interface_files(changed_file.path):
+            if not _within_budget(items, config.context_max_files, config.context_max_bytes):
+                break
+            ctx = safe_get(path)
+            if ctx is None:
+                continue
+            ctx.reason = "Related interface"
+            ctx.language = detect_language(ctx.path, ctx.content[:4096], config).language
+            _add_context_item(
+                items=items,
+                seen_paths=seen_paths,
+                candidate=ctx,
+                max_files=config.context_max_files,
+                max_bytes=config.context_max_bytes,
+            )
 
         for path in _guess_related_configs(changed_file.path):
             if not _within_budget(items, config.context_max_files, config.context_max_bytes):
